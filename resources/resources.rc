@@ -1,0 +1,6 @@
+#include <..\code\resource.h>
+
+IDI_MYICON_BIG ICON "mclip_icon_big.ico"
+IDI_MYICON_SMALL ICON "mclip_icon_small.ico"
+IDI_MYTRAY_ICON ICON "mclip_icon_tray.ico"
+

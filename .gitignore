@@ -1,0 +1,9 @@
+*exe*
+*.pdb*
+*~*
+*~
+*obj*"
+/build/
+*.rdbg
+build.bat
+*TAGS*
