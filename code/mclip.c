@@ -2,12 +2,18 @@
 #include <assert.h>
 #include <shellapi.h>
 #include "resource.h"
+#include <wingdi.h>
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
 #define MAX_HISTORY 25
+#define IDC_SEARCH_EDIT 1001
+#define IDC_LISTBOX 1002
 
 HWND hwndList;
+HWND hwndEdit;
+HBRUSH hbrBkgnd;
+
 char* clipboardHistory[MAX_HISTORY];
 int currentHistoryIndex = 0;
 //systray icon part
@@ -74,9 +80,34 @@ SetWindowIcons(HWND hwnd)
 }
 
 
+void
+HandleSearch(HWND hwndEdit, HWND hwndListBox, const TCHAR* searchBuffer)
+{
+    // Clear the LISTBOX
+    SendMessage(hwndListBox, LB_RESETCONTENT, 0, 0);
+
+    // If the search text is empty, display all items
+    if (_tcslen(searchBuffer) == 0) {
+        // Add all items from your dynamic list to the LISTBOX
+        for (int i = 0; i < currentHistoryIndex; i++) {
+            SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+        }
+    } else {
+        // Filter and add items that match the search text
+        for (int i = 0; i < currentHistoryIndex; i++) {
+            if (strstr(clipboardHistory[i], searchBuffer) != NULL) {
+                SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+            }
+        }
+    }
+    //TODO: bug when copying form formated list
+}
+
+
 LRESULT CALLBACK
 WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+
   switch (msg) {
     
   case WM_CREATE:
@@ -88,9 +119,39 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenu, "Help");
     SetMenu(hwnd, hMenu);	  
     hwndList = CreateWindow("LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_NOTIFY | WS_VSCROLL,
-			    10, 10, 360, 220, hwnd, NULL, NULL, NULL);
+			    10, 10, 360, 220, hwnd,  (HMENU)IDC_LISTBOX, NULL, NULL);
+
+    hwndEdit = CreateWindow(
+			    "EDIT",                      // Predefined class for EDIT
+			    NULL,                            // No window text
+    WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+			    10, 220, 360, 25,                // x, y, width, height
+			    hwnd,                            // Parent window
+			    (HMENU)IDC_SEARCH_EDIT,          // Control ID
+			    NULL,                       // Application instance handle
+			    NULL                             // No window creation data
+			    );    
     SetWindowIcons(hwnd);
+   
     break;
+
+  case WM_HOTKEY:
+    // Check if the hotkey ID matches the registered hotkey (1 in this example).
+    if (wParam == 1) {
+      // Maximize the window.
+      ShowWindow(hwnd, SW_RESTORE);
+    }
+    break;
+    
+       // Search box color
+  case WM_CTLCOLOREDIT:
+    if (GetDlgCtrlID((HWND)lParam) == IDC_SEARCH_EDIT) {
+      HDC hdcStatic = (HDC)wParam;
+      SetBkColor(hdcStatic, RGB(247, 248, 247)); // Set background color (here, it's red)
+      //      SetTextColor(hdcStatic, RGB(0, 0, 0)); // Set text color (here, it's black)
+      return (INT_PTR)CreateSolidBrush(RGB(0, 0, 0)); // Return a brush with the background color
+    }
+    break;        
     
   case WM_TRAY_ICON:
     if (wParam == IDI_MYTRAY_ICON) {
@@ -137,6 +198,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
     }
     break;
+
     
   case WM_COMMAND:
     switch (LOWORD(wParam)) {
@@ -162,8 +224,17 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	}
       }
     }
-    break;   
-	    
+    
+    // Search Box
+  case IDC_SEARCH_EDIT:
+    if (HIWORD(wParam) == EN_CHANGE) {
+      // Handle text changes in the edit control
+      CHAR searchText[256];
+      GetWindowText((HWND)lParam, searchText, sizeof(searchText) / sizeof(searchText[0]));
+      HandleSearch((HWND)lParam, GetDlgItem(hwnd, IDC_LISTBOX), searchText);
+    }
+    break;
+   
   case WM_DESTROY:
     PostQuitMessage(0);
     break;
@@ -173,34 +244,41 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   return 0;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = WndProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = "ClipboardHistoryApp";
-    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON_BIG));  // IDI_MYICON is the icon resource ID
-    RegisterClass(&wc);
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {  
+  
+  WNDCLASS wc = { 0 };
+  wc.lpfnWndProc = WndProc;
+  wc.hInstance = hInstance;
+  wc.lpszClassName = "ClipboardHistoryApp";
+  wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON_BIG));  // IDI_MYICON is the icon resource ID
+  RegisterClass(&wc);
 
-    HWND hwnd = CreateWindow(wc.lpszClassName, "mclip - Clipboard History App", WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
-                             CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, NULL, NULL, hInstance, NULL);
+  HWND hwnd = CreateWindow(wc.lpszClassName, "mclip - Clipboard History App", WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
+			   CW_USEDEFAULT, CW_USEDEFAULT, 400, 310, NULL, NULL, hInstance, NULL);
+  
+  AddClipboardFormatListener(hwnd);
 
-    AddClipboardFormatListener(hwnd);
-
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
+  //TODO: bug when other windows have same hotkey
+     // hotkey needs to be in main?
+  BOOL success = RegisterHotKey(hwnd, 1, MOD_ALT, 0x42);
+  if (!success) {
+    MessageBox(NULL, "Failed to register hotkey.", "Error", MB_OK | MB_ICONERROR);
+  } 
+  ShowWindow(hwnd, nCmdShow);
+  UpdateWindow(hwnd);
+  
+  MSG msg;
+  while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
+  }
+  
+  //This is just a cleanup when window is getting closed. Probably not necessary.
+  for (int i = 0; i < MAX_HISTORY; ++i) {
+    if (clipboardHistory[i]) {
+      free(clipboardHistory[i]);
     }
-
-    //This is just a cleanup when window is getting closed. Probably not necessary.
-    for (int i = 0; i < MAX_HISTORY; ++i) {
-        if (clipboardHistory[i]) {
-            free(clipboardHistory[i]);
-        }
-    }
-
-    return 0;
+  }
+  
+  return 0;
 }

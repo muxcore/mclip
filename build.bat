@@ -19,5 +19,5 @@ echo Script: path: %scriptpath%%filename%
 echo Current directory: %CD%
 rc /r %scriptpath%\resources\resources.rc
 cl /TC /Zi /c %scriptpath%\code\%filename%.c /Fo%scriptpath%build\ /Fd%scriptpath%build\%filename%.pdb /Fe%scriptpath%build
-link -incremental:no /DEBUG %scriptpath%\build\*.obj /SUBSYSTEM:windows /OUT:%scriptpath%\build\%filename%.exe user32.lib shell32.lib %scriptpath%\resources\resources.res
+link -incremental:no /DEBUG %scriptpath%\build\*.obj /SUBSYSTEM:windows /OUT:%scriptpath%\build\%filename%.exe user32.lib shell32.lib gdi32.lib %scriptpath%\resources\resources.res
 
