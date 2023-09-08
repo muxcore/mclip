@@ -17,9 +17,9 @@ Only real customization option is basially MAX_HISTORY macro. Currently set to 2
 Total time spent was 2.5h, with the help of LLM's! 
 
 # TODO 
-- Add search box to filter items for substring - currently bug for filtered listbox.
+- ~~Add search box to filter items for substring - currently bug for filtered listbox.~~
 - Ability to change number of history items from the application itself.
-- Bug: Hotkeys do not work properly.
+- Todo: Hotkeys currently mapped to ALT + VK_OEM_1 -- lookup what is it in your country.
 
 ## Licence
 MIT 

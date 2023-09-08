@@ -1,8 +1,11 @@
 #include <windows.h>
 #include <assert.h>
+#include <string.h>
 #include <shellapi.h>
 #include "resource.h"
 #include <wingdi.h>
+#include <stdbool.h>
+
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
@@ -47,9 +50,19 @@ displayLastError(const char *functionName)
 void
 ShowAboutDialog(HWND hwnd)
 {
-  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.1\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
+  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.2\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
 }
 
+bool
+entryExists(const char *str1, const char *history[], size_t len)
+{
+  bool stringExists = FALSE;
+  for (size_t i = 0; i < len; i++) {
+    if (strcmp(str1, history[i]) == 0)
+      return TRUE;
+  }  
+  return FALSE;
+}
 
 void
 SetWindowIcons(HWND hwnd)
@@ -89,12 +102,12 @@ HandleSearch(HWND hwndEdit, HWND hwndListBox, const TCHAR* searchBuffer)
     // If the search text is empty, display all items
     if (_tcslen(searchBuffer) == 0) {
         // Add all items from your dynamic list to the LISTBOX
-        for (int i = 0; i < currentHistoryIndex; i++) {
+        for (int i = currentHistoryIndex-1; i >= 0; i--) {
             SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
         }
     } else {
         // Filter and add items that match the search text
-        for (int i = 0; i < currentHistoryIndex; i++) {
+        for (int i = currentHistoryIndex-1; i >= 0; i--) {
             if (strstr(clipboardHistory[i], searchBuffer) != NULL) {
                 SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
             }
@@ -188,9 +201,11 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	    if (clipboardHistory[currentHistoryIndex]) {
 	      GlobalFree(clipboardHistory[currentHistoryIndex]);
 	    }
-	    clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
-	    SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)clipboardText);
-	    currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;
+	    if (!entryExists(clipboardText, clipboardHistory, currentHistoryIndex)) {
+		clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
+		SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)clipboardText);
+		currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;	    
+	      }
 	    GlobalUnlock(hClipboardData);
 	  }
 	}
@@ -198,7 +213,6 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
     }
     break;
-
     
   case WM_COMMAND:
     switch (LOWORD(wParam)) {
@@ -211,17 +225,27 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       if (selectedIndex != LB_ERR) {
 	if (OpenClipboard(hwnd)) {
 	  EmptyClipboard();
-	  HGLOBAL hClipboardData = GlobalAlloc(GMEM_MOVEABLE, strlen(clipboardHistory[selectedIndex]) + 1);
-	  if (hClipboardData) {
-	    char* clipboardText = (char*)GlobalLock(hClipboardData);
-	    if (clipboardText) {
-	      strcpy(clipboardText, clipboardHistory[selectedIndex]);
-	      GlobalUnlock(hClipboardData);
-	      SetClipboardData(CF_TEXT, hClipboardData);
-	    }
+	  int textLength = SendMessage(hwndList, LB_GETTEXTLEN, selectedIndex, 0);
+	  if (textLength != LB_ERR) {
+	    char* buffer = (char*)malloc(textLength + 1); // +1 for null terminator
+	    if (buffer != NULL) {
+	      // Get the text of the selected item.
+	      SendMessage(hwndList, LB_GETTEXT, selectedIndex, (LPARAM)buffer);
+	      
+	      HGLOBAL hClipboardData = GlobalAlloc(GMEM_MOVEABLE, textLength + 1);
+	      if (hClipboardData) {
+		char* clipboardText = (char*)GlobalLock(hClipboardData);
+		if (clipboardText) {
+		  strcpy(clipboardText, buffer);
+		  free(buffer);	  
+		  GlobalUnlock(hClipboardData);
+		  SetClipboardData(CF_TEXT, hClipboardData);
+		}
+	      }
+	    }	    
 	  }
-	  CloseClipboard();
 	}
+	CloseClipboard();
       }
     }
     
@@ -229,7 +253,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   case IDC_SEARCH_EDIT:
     if (HIWORD(wParam) == EN_CHANGE) {
       // Handle text changes in the edit control
-      CHAR searchText[256];
+      CHAR searchText[256] = {0};
       GetWindowText((HWND)lParam, searchText, sizeof(searchText) / sizeof(searchText[0]));
       HandleSearch((HWND)lParam, GetDlgItem(hwnd, IDC_LISTBOX), searchText);
     }
@@ -260,7 +284,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   //TODO: bug when other windows have same hotkey
      // hotkey needs to be in main?
-  BOOL success = RegisterHotKey(hwnd, 1, MOD_ALT, 0x42);
+  BOOL success = RegisterHotKey(hwnd, 1, MOD_ALT, VK_OEM_1);
   if (!success) {
     MessageBox(NULL, "Failed to register hotkey.", "Error", MB_OK | MB_ICONERROR);
   } 
