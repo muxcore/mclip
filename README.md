@@ -2,6 +2,8 @@
 Bare minimum clipboard history history application. Using only Win32 API.  
 Logs every CTRL-C call, and shows content in Listbox window.  
 
+![mclip](resources/mclip_icon.jpg)
+
 ## Requirement
 Created with:  
  - Microsoft (R) C/C++ Optimizing Compiler Version 19.36.32532 for x64

@@ -5,7 +5,7 @@
 #include "resource.h"
 #include <wingdi.h>
 #include <stdbool.h>
-
+#include <stdio.h>
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
@@ -56,7 +56,6 @@ ShowAboutDialog(HWND hwnd)
 bool
 entryExists(const char *str1, const char *history[], size_t len)
 {
-  bool stringExists = FALSE;
   for (size_t i = 0; i < len; i++) {
     if (strcmp(str1, history[i]) == 0)
       return TRUE;
@@ -92,15 +91,37 @@ SetWindowIcons(HWND hwnd)
 
 }
 
+// case insensitive strstr
+char
+*stristr(const char *haystack, const char *needle)
+{
+  size_t haystack_len = strlen(haystack);
+  size_t needle_len = strlen(needle);
+
+  for (size_t i = 0; i <= haystack_len - needle_len; i++) {
+    size_t j;
+    for (j = 0; j < needle_len; j++) {
+      if (tolower(haystack[i + j]) != tolower(needle[j])) {
+	break;
+      }
+    }
+    if (j == needle_len) {
+      return (char *)(haystack + i);  // Match found
+    }
+  }
+  return NULL;  // No match found
+}
+
+
 
 void
-HandleSearch(HWND hwndEdit, HWND hwndListBox, const TCHAR* searchBuffer)
+HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
 {
     // Clear the LISTBOX
     SendMessage(hwndListBox, LB_RESETCONTENT, 0, 0);
 
     // If the search text is empty, display all items
-    if (_tcslen(searchBuffer) == 0) {
+    if (strlen(searchBuffer) == 0) {
         // Add all items from your dynamic list to the LISTBOX
         for (int i = currentHistoryIndex-1; i >= 0; i--) {
             SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
@@ -108,9 +129,9 @@ HandleSearch(HWND hwndEdit, HWND hwndListBox, const TCHAR* searchBuffer)
     } else {
         // Filter and add items that match the search text
         for (int i = currentHistoryIndex-1; i >= 0; i--) {
-            if (strstr(clipboardHistory[i], searchBuffer) != NULL) {
+            if (stristr(clipboardHistory[i], searchBuffer) != NULL) {
                 SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
-            }
+             }
         }
     }
     //TODO: bug when copying form formated list
@@ -255,7 +276,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       // Handle text changes in the edit control
       CHAR searchText[256] = {0};
       GetWindowText((HWND)lParam, searchText, sizeof(searchText) / sizeof(searchText[0]));
-      HandleSearch((HWND)lParam, GetDlgItem(hwnd, IDC_LISTBOX), searchText);
+      HandleSearch(GetDlgItem(hwnd, IDC_LISTBOX), searchText);
     }
     break;
    
