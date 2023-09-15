@@ -11,7 +11,11 @@ Created with:
 ## Installation
 1. Clone repository
 2. Adjust *build.bat* to your local environement variables and path. 
-4. If everything goes well *\build* directory will contain final binary.
+4. If everything goes well *\build* directory will contain final binary.  
+
+Or use binary available in build directory.  
+![mclip](build/mclip.zip)
+
 
 ## Disclaimer
 ~~Probably~~ Contains bugs.   
