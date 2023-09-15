@@ -14,7 +14,8 @@ Created with:
 4. If everything goes well *\build* directory will contain final binary.  
 
 Or use binary available in build directory.  
-![mclip](build/mclip.zip)
+![mclip_app](resources/mclip_app.jpg)
+(build/mclip.zip)
 
 
 ## Disclaimer
