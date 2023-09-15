@@ -21,6 +21,8 @@ char* clipboardHistory[MAX_HISTORY];
 int currentHistoryIndex = 0;
 //systray icon part
 static NOTIFYICONDATA nid = { sizeof(NOTIFYICONDATA) };
+bool windowRestored = true;
+
 
 void
 displayLastError(const char *functionName)
@@ -98,6 +100,9 @@ char
   size_t haystack_len = strlen(haystack);
   size_t needle_len = strlen(needle);
 
+  if (haystack_len < needle_len)
+    return NULL;
+  
   for (size_t i = 0; i <= haystack_len - needle_len; i++) {
     size_t j;
     for (j = 0; j < needle_len; j++) {
@@ -122,17 +127,17 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
 
     // If the search text is empty, display all items
     if (strlen(searchBuffer) == 0) {
-        // Add all items from your dynamic list to the LISTBOX
-        for (int i = currentHistoryIndex-1; i >= 0; i--) {
-            SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
-        }
+      // Add all items from your dynamic list to the LISTBOX
+      for (int i = currentHistoryIndex-1; i >= 0; i--) {
+	SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+      }
     } else {
-        // Filter and add items that match the search text
-        for (int i = currentHistoryIndex-1; i >= 0; i--) {
-            if (stristr(clipboardHistory[i], searchBuffer) != NULL) {
-                SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
-             }
-        }
+      // Filter and add items that match the search text
+      for (int i = currentHistoryIndex-1; i >= 0; i--) {
+	if (stristr(clipboardHistory[i], searchBuffer) != NULL) {
+	  SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+	}
+      }
     }
     //TODO: bug when copying form formated list
 }
@@ -169,11 +174,27 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
    
     break;
 
+    
+  case WM_KILLFOCUS:
+    // Handle the window losing focus here
+    windowRestored = false;
+    break;    
+
+    
   case WM_HOTKEY:
     // Check if the hotkey ID matches the registered hotkey (1 in this example).
     if (wParam == 1) {
       // Maximize the window.
-      ShowWindow(hwnd, SW_RESTORE);
+      if (!windowRestored) {
+	  ShowWindow(hwnd, SW_SHOW);
+	  SetForegroundWindow(hwnd);
+	  SetFocus(hwndEdit);
+	  windowRestored = !windowRestored;
+	}
+      else {
+	ShowWindow(hwnd, SW_HIDE);
+	windowRestored = !windowRestored;
+      }
     }
     break;
     
