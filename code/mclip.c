@@ -6,10 +6,12 @@
 #include <wingdi.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <shlwapi.h>
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
 #define MAX_HISTORY 25
+
 #define IDC_SEARCH_EDIT 1001
 #define IDC_LISTBOX 1002
 
@@ -17,12 +19,13 @@ HWND hwndList;
 HWND hwndEdit;
 HBRUSH hbrBkgnd;
 
-char* clipboardHistory[MAX_HISTORY];
-int currentHistoryIndex = 0;
+char* clipboardHistory[MAX_HISTORY] = {0};
+int currentHistoryIndex = 0; // If 
+
 //systray icon part
 static NOTIFYICONDATA nid = { sizeof(NOTIFYICONDATA) };
-bool windowRestored = true;
-
+bool windowRestored = TRUE;
+bool changeListBox = TRUE;
 
 void
 displayLastError(const char *functionName)
@@ -52,15 +55,44 @@ displayLastError(const char *functionName)
 void
 ShowAboutDialog(HWND hwnd)
 {
-  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.2\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
+  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.3\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
 }
 
+
+//if we have anything in history, returns TRUE
 bool
-entryExists(const char *str1, const char *history[], size_t len)
+historyExists()
 {
-  for (size_t i = 0; i < len; i++) {
-    if (strcmp(str1, history[i]) == 0)
-      return TRUE;
+  bool result = FALSE;
+  for (size_t i = 0; i < MAX_HISTORY; i++) {
+    if (clipboardHistory[i] != NULL)
+      result = TRUE;
+  }
+  return result;
+}
+
+//returns number of items in history
+size_t
+lenHistory()
+{
+  size_t result = 0;
+  for (size_t i = 0; i < MAX_HISTORY; i++) {
+    if (clipboardHistory[i] != NULL)
+      result++;
+  }
+  return result;
+}
+
+
+bool
+entryExists(const char *str1, const char *history[])
+{
+  assert(str1);
+  for (size_t i = 0; i < MAX_HISTORY; i++) {
+    if (history[i] != NULL) {
+      if (strcmp(str1, history[i]) == 0)
+	return TRUE;
+    }
   }  
   return FALSE;
 }
@@ -93,53 +125,31 @@ SetWindowIcons(HWND hwnd)
 
 }
 
-// case insensitive strstr
-char
-*stristr(const char *haystack, const char *needle)
-{
-  size_t haystack_len = strlen(haystack);
-  size_t needle_len = strlen(needle);
-
-  if (haystack_len < needle_len)
-    return NULL;
-  
-  for (size_t i = 0; i <= haystack_len - needle_len; i++) {
-    size_t j;
-    for (j = 0; j < needle_len; j++) {
-      if (tolower(haystack[i + j]) != tolower(needle[j])) {
-	break;
-      }
-    }
-    if (j == needle_len) {
-      return (char *)(haystack + i);  // Match found
-    }
-  }
-  return NULL;  // No match found
-}
-
-
-
 void
 HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
-{
-    // Clear the LISTBOX
-    SendMessage(hwndListBox, LB_RESETCONTENT, 0, 0);
+{ 
+  // Clear the LISTBOX
+  SendMessage(hwndListBox, LB_RESETCONTENT, 0, 0);
 
-    // If the search text is empty, display all items
-    if (strlen(searchBuffer) == 0) {
-      // Add all items from your dynamic list to the LISTBOX
-      for (int i = currentHistoryIndex-1; i >= 0; i--) {
-	SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
-      }
-    } else {
-      // Filter and add items that match the search text
-      for (int i = currentHistoryIndex-1; i >= 0; i--) {
-	if (stristr(clipboardHistory[i], searchBuffer) != NULL) {
+  // If the search text is empty, display all items
+  if (strlen(searchBuffer) == 0 && historyExists()) {
+    // Add all items from your dynamic list to the LISTBOX
+    for (int i = currentHistoryIndex; i >= 0; --i) {
+      SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+    }
+  }
+  else {
+    // Filter and add items that match the search text
+    for (int i = currentHistoryIndex; i >= 0; --i) {
+      //      assert(clipboardHistory[i]);
+      assert(searchBuffer);	
+      if (clipboardHistory[i] != NULL) {
+	if (StrStrIA(clipboardHistory[i], searchBuffer) != NULL) {
 	  SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
 	}
       }
     }
-    //TODO: bug when copying form formated list
+  }
 }
 
 
@@ -177,7 +187,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     
   case WM_KILLFOCUS:
     // Handle the window losing focus here
-    windowRestored = false;
+    windowRestored = FALSE;
     break;    
 
     
@@ -229,25 +239,31 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       return DefWindowProc(hwnd, msg, wParam, lParam);    
     break;
     
-  case WM_CLIPBOARDUPDATE:
-    if (currentHistoryIndex + 1 == MAX_HISTORY) {
-      SendMessage(hwndList, LB_DELETESTRING, 0, 0);
-      --currentHistoryIndex;
-    }	  
+  case WM_CLIPBOARDUPDATE:  
+    // once we have reached full history (high water mark of MAX_HISTORY), we know that we need to delete last item
+    /* if (lenHistory() == MAX_HISTORY) { */
+    /*   SendMessage(hwndList, LB_DELETESTRING, 0, 0); */
+    /*  }   */
+    
     if (IsClipboardFormatAvailable(CF_TEXT)) {
       if (OpenClipboard(hwnd)) {
 	HANDLE hClipboardData = GetClipboardData(CF_TEXT);
 	if (hClipboardData != NULL) {
 	  char* clipboardText = (char*)GlobalLock(hClipboardData);
-	  if (clipboardText != NULL) {
-	    if (clipboardHistory[currentHistoryIndex]) {
-	      GlobalFree(clipboardHistory[currentHistoryIndex]);
+	  if (clipboardText != NULL) {	    
+	    if (!entryExists(clipboardText, clipboardHistory)) {
+	      if (clipboardHistory[currentHistoryIndex]) {
+		free(clipboardHistory[currentHistoryIndex]);
+	      }	      
+	      clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
+	      SendMessage(hwndList, LB_RESETCONTENT, 0, 0);
+	      for (int i = MAX_HISTORY-1; i >= 0; i--) {
+		if (clipboardHistory[i] != NULL) {
+		  SendMessage(hwndList, LB_ADDSTRING, 0, clipboardHistory[i]);
+		}
+		}
+	      currentHistoryIndex = (currentHistoryIndex+1) % MAX_HISTORY;	
 	    }
-	    if (!entryExists(clipboardText, clipboardHistory, currentHistoryIndex)) {
-		clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
-		SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)clipboardText);
-		currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;	    
-	      }
 	    GlobalUnlock(hClipboardData);
 	  }
 	}
@@ -261,7 +277,8 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case 1:
       ShowAboutDialog(hwnd);
       break;
-    }	  
+    }
+    //copies selection for listbox to clipboard
     if (HIWORD(wParam) == LBN_SELCHANGE && (HWND)lParam == hwndList) {
       int selectedIndex = SendMessage(hwndList, LB_GETCURSEL, 0, 0);
       if (selectedIndex != LB_ERR) {
@@ -311,6 +328,9 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {  
+  //Uncomment this to have console for Windows (== not console) programs
+  //AllocConsole();
+  //freopen("CONOUT$", "w", stdout); // Redirect stdout to the console window
   
   WNDCLASS wc = { 0 };
   wc.lpfnWndProc = WndProc;
