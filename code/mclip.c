@@ -55,7 +55,7 @@ displayLastError(const char *functionName)
 void
 ShowAboutDialog(HWND hwnd)
 {
-  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.3\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
+  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.4\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
 }
 
 
@@ -153,6 +153,80 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
 }
 
 
+// Function to handle WM_KEYDOWN message
+void OnKeyDown(HWND hwnd, WPARAM wParam)
+{
+  HWND listBox = GetDlgItem(hwnd, IDC_LISTBOX); // Replace IDC_LISTBOX with your list box ID
+  HWND editBox = GetDlgItem(hwnd, IDC_SEARCH_EDIT); // Replace IDC_LISTBOX with your list box ID  
+
+  int selectedIndex = SendMessage(listBox, LB_GETCURSEL, 0, 0);
+
+  switch (wParam) {
+  case VK_UP:    
+    if (selectedIndex > 0) {
+      SendMessage(listBox, LB_SETCURSEL, selectedIndex - 1, 0);
+      SetFocus(listBox);
+    }
+    break;
+    
+  case VK_DOWN:
+    int itemCount = SendMessage(listBox, LB_GETCOUNT, 0, 0);
+    if (selectedIndex < itemCount - 1) {
+      SendMessage(listBox, LB_SETCURSEL, selectedIndex + 1, 0);
+      SetFocus(listBox);      
+    }
+    break;
+
+  case VK_RETURN: // Enter key - copies selected item to clipboard
+    if (selectedIndex != LB_ERR) {
+      // Get the length of the selected item
+      int itemLength = SendMessage(listBox, LB_GETTEXTLEN, selectedIndex, 0);
+      // Allocate memory to store the selected item
+      char *buffer = malloc(sizeof(char) * (itemLength + 1));
+      // Get the selected item
+      SendMessage(listBox, LB_GETTEXT, selectedIndex, (LPARAM)buffer);
+      // Open the clipboard, empty it, and set the data
+      if (OpenClipboard(hwnd)) {
+	EmptyClipboard();
+	HGLOBAL hClipboardData = GlobalAlloc(GMEM_DDESHARE, (itemLength + 1) * sizeof(TCHAR));
+	if (hClipboardData != NULL) {
+	  LPTSTR clipboardPtr = (LPTSTR)GlobalLock(hClipboardData);
+	  lstrcpy(clipboardPtr, buffer);
+	  GlobalUnlock(hClipboardData);
+	  SetClipboardData(CF_UNICODETEXT, hClipboardData);
+	}
+	CloseClipboard();
+      }
+      // Clean up
+      free(buffer);
+    }
+    break;
+    //TODO Tab switching is broken
+  case VK_TAB:
+    HWND currentFocus = GetForegroundWindow();//GetFocus();
+    
+    wchar_t className[256];
+    wchar_t windowText[256];
+
+    GetClassName(currentFocus, className, sizeof(className) / sizeof(wchar_t));
+    GetWindowText(currentFocus, windowText, sizeof(windowText) / sizeof(wchar_t));    
+    // If the list box has focus, set focus to the edit box; otherwise, set focus to the list box
+    if (currentFocus == editBox) {
+      SetFocus(listBox);
+    } else 
+      SetFocus(editBox);
+    break;   
+    
+    // Handle other keys as needed
+  default:
+    // Handle other key presses
+    break;
+  }
+}
+
+
+
+
 LRESULT CALLBACK
 WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -181,7 +255,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			    NULL                             // No window creation data
 			    );    
     SetWindowIcons(hwnd);
-   
+    SetFocus(hwndEdit);
     break;
 
     
@@ -189,7 +263,10 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // Handle the window losing focus here
     windowRestored = FALSE;
     break;    
-
+   
+ case WM_KEYDOWN:
+   OnKeyDown(hwnd, wParam);
+   break;    
     
   case WM_HOTKEY:
     // Check if the hotkey ID matches the registered hotkey (1 in this example).
@@ -306,8 +383,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	}
 	CloseClipboard();
       }
-    }
-    
+    }    
     // Search Box
   case IDC_SEARCH_EDIT:
     if (HIWORD(wParam) == EN_CHANGE) {
@@ -316,8 +392,8 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       GetWindowText((HWND)lParam, searchText, sizeof(searchText) / sizeof(searchText[0]));
       HandleSearch(GetDlgItem(hwnd, IDC_LISTBOX), searchText);
     }
-    break;
-   
+    break; 
+    
   case WM_DESTROY:
     PostQuitMessage(0);
     break;
