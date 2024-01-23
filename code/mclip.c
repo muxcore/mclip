@@ -10,7 +10,7 @@
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
-#define MAX_HISTORY 25
+#define MAX_HISTORY 50
 
 #define IDC_SEARCH_EDIT 1001
 #define IDC_LISTBOX 1002
@@ -333,13 +333,13 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		free(clipboardHistory[currentHistoryIndex]);
 	      }	      
 	      clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
+	      currentHistoryIndex = (currentHistoryIndex+1) % MAX_HISTORY;		      
 	      SendMessage(hwndList, LB_RESETCONTENT, 0, 0);
 	      for (int i = MAX_HISTORY-1; i >= 0; i--) {
 		if (clipboardHistory[i] != NULL) {
 		  SendMessage(hwndList, LB_ADDSTRING, 0, clipboardHistory[i]);
 		}
-		}
-	      currentHistoryIndex = (currentHistoryIndex+1) % MAX_HISTORY;	
+	      }	      
 	    }
 	    GlobalUnlock(hClipboardData);
 	  }
