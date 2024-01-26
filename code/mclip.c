@@ -134,13 +134,13 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
   // If the search text is empty, display all items
   if (strlen(searchBuffer) == 0 && historyExists()) {
     // Add all items from your dynamic list to the LISTBOX
-    for (int i = currentHistoryIndex-1; i >= 0; --i) {
+    for (int i = MAX_HISTORY-1; i >= 0; --i) {
       SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
     }
   }
   else {
     // Filter and add items that match the search text
-    for (int i = currentHistoryIndex-1; i >= 0; --i) {
+    for (int i = MAX_HISTORY-1; i >= 0; --i) {
       //      assert(clipboardHistory[i]);
       assert(searchBuffer);	
       if (clipboardHistory[i] != NULL) {
