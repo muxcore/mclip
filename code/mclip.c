@@ -27,6 +27,9 @@ static NOTIFYICONDATA nid = { sizeof(NOTIFYICONDATA) };
 bool windowRestored = TRUE;
 bool changeListBox = TRUE;
 
+// Global variable to store the original window procedure address
+WNDPROC g_pOldWndProc = NULL;
+
 void
 displayLastError(const char *functionName)
 {
@@ -154,13 +157,22 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
 
 
 // Function to handle WM_KEYDOWN message
-void OnKeyDown(HWND hwnd, WPARAM wParam)
+void OnKeyDown(HWND hwnd, WPARAM wParam, HWND hEditBox, HWND hListBox)
 {
   HWND listBox = GetDlgItem(hwnd, IDC_LISTBOX); // Replace IDC_LISTBOX with your list box ID
   HWND editBox = GetDlgItem(hwnd, IDC_SEARCH_EDIT); // Replace IDC_LISTBOX with your list box ID  
 
   int selectedIndex = SendMessage(listBox, LB_GETCURSEL, 0, 0);
 
+  if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'P')) {
+    MessageBox(hwnd, "Ctrl+P Pressed!", "Key Pressed", MB_OK | MB_ICONINFORMATION);
+    HWND currentFocus = GetFocus(); //GetForegroundWindow();
+    if (currentFocus == hEditBox) 
+      SetFocus(hListBox);
+    else
+      SetFocus(hEditBox);
+  }  
+  
   switch (wParam) {
   case VK_UP:    
     if (selectedIndex > 0) {
@@ -200,23 +212,7 @@ void OnKeyDown(HWND hwnd, WPARAM wParam)
       // Clean up
       free(buffer);
     }
-    break;
-    //TODO Tab switching is broken
-  case VK_TAB:
-    HWND currentFocus = GetForegroundWindow();//GetFocus();
-    
-    wchar_t className[256];
-    wchar_t windowText[256];
-
-    GetClassName(currentFocus, className, sizeof(className) / sizeof(wchar_t));
-    GetWindowText(currentFocus, windowText, sizeof(windowText) / sizeof(wchar_t));    
-    // If the list box has focus, set focus to the edit box; otherwise, set focus to the list box
-    if (currentFocus == editBox) {
-      SetFocus(listBox);
-    } else 
-      SetFocus(editBox);
-    break;   
-    
+    break;    
     // Handle other keys as needed
   default:
     // Handle other key presses
@@ -225,7 +221,22 @@ void OnKeyDown(HWND hwnd, WPARAM wParam)
 }
 
 
+LRESULT CALLBACK ListBoxSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+        case WM_KEYDOWN:
+            // Check if Ctrl key is pressed and 'P' key is pressed
+            if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'P')) {
+                MessageBox(hwnd, "Ctrl+P Pressed while in ListBox!", "Key Pressed", MB_OK | MB_ICONINFORMATION);
+            }
+            break;
 
+        default:
+            // Call the default window procedure for any messages not handled
+	   return CallWindowProc(g_pOldWndProc, hwnd, message, wParam, lParam);
+    }
+
+    return 0;
+}
 
 LRESULT CALLBACK
 WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -255,7 +266,13 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			    NULL                             // No window creation data
 			    );    
     SetWindowIcons(hwnd);
+    SendMessage(hwndEdit, EM_SETTABSTOPS, 1, 0);
     SetFocus(hwndEdit);
+
+      //Subclass Editbox
+    SetWindowLongPtr(hwndEdit, GWLP_WNDPROC, (LONG_PTR)ListBoxSubclassProc);
+    
+     
     break;
 
     
@@ -263,11 +280,14 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // Handle the window losing focus here
     windowRestored = FALSE;
     break;    
-   
+
+    /* Start Moving withing Mclip */
  case WM_KEYDOWN:
-   OnKeyDown(hwnd, wParam);
-   break;    
-    
+   OnKeyDown(hwnd, wParam, hwndEdit, hwndList);
+   break;
+  
+    /* End Moving withing Mclip */
+  
   case WM_HOTKEY:
     // Check if the hotkey ID matches the registered hotkey (1 in this example).
     if (wParam == 1) {
@@ -428,6 +448,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   } 
   ShowWindow(hwnd, nCmdShow);
   UpdateWindow(hwnd);
+
   
   MSG msg;
   while (GetMessage(&msg, NULL, 0, 0)) {
