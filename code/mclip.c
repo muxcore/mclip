@@ -27,7 +27,9 @@ bool windowRestored = TRUE;
 bool changeListBox = TRUE;
 
 // Global variable to store the original window procedure address
-WNDPROC g_pOldWndProc = NULL;
+WNDPROC g_pOldListProc = NULL;
+WNDPROC g_pOldEditProc = NULL;
+
 
 // Global brush for the background color:
 HBRUSH g_hBrush = NULL;
@@ -216,7 +218,10 @@ void OnKeyDown(HWND hwnd, WPARAM wParam, HWND hEditBox, HWND hListBox)
       // Clean up
       free(buffer);
     }
-    break;    
+    break;
+
+    // case VK_TAB: //cannot be here since system is intersepting it first
+        
     // Handle other keys as needed
   default:
     // Handle other key presses
@@ -228,22 +233,46 @@ void OnKeyDown(HWND hwnd, WPARAM wParam, HWND hEditBox, HWND hListBox)
 
 LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    switch (message) {
-        case WM_KEYDOWN:
-            // Check if Ctrl key is pressed and 'P' key is pressed
-            if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'P')) {
-                MessageBox(hwnd, TEXT("Ctrl+P Pressed in Edit Box!"), TEXT("Key Pressed"), MB_OK | MB_ICONINFORMATION);
-                // You can add more custom behavior here
-                return 0; // We handled the message
-            }
-            break;    
-        
-        // Add other cases as needed
+    switch (message) {      
+    case WM_KEYDOWN:
+      // Check if Ctrl key is pressed and 'P' key is pressed
+      if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'P')) {
+	MessageBox(hwnd, TEXT("Ctrl+P Pressed in Edit Box!"), TEXT("Key Pressed"), MB_OK | MB_ICONINFORMATION);
+	// You can add more custom behavior here
+	return 0; // We handled the message
+      }
+      if (wParam == VK_TAB)
+        {
+	  SetFocus(hwndList);
+	  return 0;
+        }
+      
+      break;    
+      
+      // Add other cases as needed
     }
-
+    
     // Call the original window procedure for any messages not handled
-    return CallWindowProc(g_pOldWndProc, hwnd, message, wParam, lParam);
+    return CallWindowProc(g_pOldEditProc, hwnd, message, wParam, lParam);
 }
+
+LRESULT CALLBACK ListSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+  switch (message)
+    {
+    case WM_KEYDOWN:
+      if (wParam == VK_TAB)
+	  {
+	  SetFocus(hwndEdit);
+            return 0;
+        }
+        break;
+	
+	// Call the original window procedure for any messages not handled    
+    }
+  return CallWindowProc(g_pOldListProc, hwnd, message, wParam, lParam);
+}
+
 
 
 LRESULT CALLBACK
@@ -275,9 +304,12 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     SetWindowIcons(hwnd);
     SendMessage(hwndEdit, EM_SETTABSTOPS, 1, 0);
     SetFocus(hwndEdit);   
-      //Subclass Editbox
-    g_pOldWndProc = (WNDPROC)SetWindowLongPtr(hwndEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);   
-    if (g_pOldWndProc == NULL) {
+      //Subclass both ListBox and  Editbox since i want to intersept TAB in both
+    g_pOldEditProc = (WNDPROC)SetWindowLongPtr(hwndEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);
+    g_pOldListProc = (WNDPROC)SetWindowLongPtr(hwndList, GWLP_WNDPROC, (LONG_PTR)ListSubclassProc);   
+
+
+    if (g_pOldEditProc == NULL || g_pOldListProc == NULL) {
       // Handle error
       MessageBox(hwnd, TEXT("Failed to subclass edit control"), TEXT("Error"), MB_OK | MB_ICONERROR);
     }
@@ -290,7 +322,6 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // Handle the window losing focus here
     windowRestored = FALSE;
     break;    
-
     
     /* Start Moving withing Mclip */
  case WM_KEYDOWN:
