@@ -17,7 +17,6 @@
 
 HWND hwndList;
 HWND hwndEdit;
-HBRUSH hbrBkgnd;
 
 char* clipboardHistory[MAX_HISTORY] = {0};
 int currentHistoryIndex = 0; // If 
@@ -29,6 +28,10 @@ bool changeListBox = TRUE;
 
 // Global variable to store the original window procedure address
 WNDPROC g_pOldWndProc = NULL;
+
+// Global brush for the background color:
+HBRUSH g_hBrush = NULL;
+COLORREF color = RGB(235, 237, 202);  // Yellow color
 
 void
 displayLastError(const char *functionName)
@@ -58,7 +61,7 @@ displayLastError(const char *functionName)
 void
 ShowAboutDialog(HWND hwnd)
 {
-  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.4\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
+  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.4.1\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
 }
 
 
@@ -138,7 +141,8 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
   if (strlen(searchBuffer) == 0 && historyExists()) {
     // Add all items from your dynamic list to the LISTBOX
     for (int i = MAX_HISTORY-1; i >= 0; --i) {
-      SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+      if (clipboardHistory[i] != NULL)
+	SendMessage(hwndListBox, LB_INSERTSTRING, 0, (LPARAM)clipboardHistory[i]);
     }
   }
   else {
@@ -148,7 +152,7 @@ HandleSearch(HWND hwndListBox, const TCHAR* searchBuffer)
       assert(searchBuffer);	
       if (clipboardHistory[i] != NULL) {
 	if (StrStrIA(clipboardHistory[i], searchBuffer) != NULL) {
-	  SendMessage(hwndListBox, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+	  SendMessage(hwndListBox, LB_INSERTSTRING, 0, (LPARAM)clipboardHistory[i]);
 	}
       }
     }
@@ -168,9 +172,9 @@ void OnKeyDown(HWND hwnd, WPARAM wParam, HWND hEditBox, HWND hListBox)
     MessageBox(hwnd, "Ctrl+P Pressed!", "Key Pressed", MB_OK | MB_ICONINFORMATION);
     HWND currentFocus = GetFocus(); //GetForegroundWindow();
     if (currentFocus == hEditBox) 
-      SetFocus(hListBox);
+      SetFocus(listBox);
     else
-      SetFocus(hEditBox);
+      SetFocus(editBox);
   }  
   
   switch (wParam) {
@@ -221,22 +225,26 @@ void OnKeyDown(HWND hwnd, WPARAM wParam, HWND hEditBox, HWND hListBox)
 }
 
 
-LRESULT CALLBACK ListBoxSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+
+LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
     switch (message) {
         case WM_KEYDOWN:
             // Check if Ctrl key is pressed and 'P' key is pressed
             if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'P')) {
-                MessageBox(hwnd, "Ctrl+P Pressed while in ListBox!", "Key Pressed", MB_OK | MB_ICONINFORMATION);
+                MessageBox(hwnd, TEXT("Ctrl+P Pressed in Edit Box!"), TEXT("Key Pressed"), MB_OK | MB_ICONINFORMATION);
+                // You can add more custom behavior here
+                return 0; // We handled the message
             }
-            break;
-
-        default:
-            // Call the default window procedure for any messages not handled
-	   return CallWindowProc(g_pOldWndProc, hwnd, message, wParam, lParam);
+            break;    
+        
+        // Add other cases as needed
     }
 
-    return 0;
+    // Call the original window procedure for any messages not handled
+    return CallWindowProc(g_pOldWndProc, hwnd, message, wParam, lParam);
 }
+
 
 LRESULT CALLBACK
 WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -254,7 +262,6 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     SetMenu(hwnd, hMenu);	  
     hwndList = CreateWindow("LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_NOTIFY | WS_VSCROLL,
 			    10, 10, 360, 220, hwnd,  (HMENU)IDC_LISTBOX, NULL, NULL);
-
     hwndEdit = CreateWindow(
 			    "EDIT",                      // Predefined class for EDIT
 			    NULL,                            // No window text
@@ -267,12 +274,15 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			    );    
     SetWindowIcons(hwnd);
     SendMessage(hwndEdit, EM_SETTABSTOPS, 1, 0);
-    SetFocus(hwndEdit);
-
+    SetFocus(hwndEdit);   
       //Subclass Editbox
-    SetWindowLongPtr(hwndEdit, GWLP_WNDPROC, (LONG_PTR)ListBoxSubclassProc);
-    
-     
+    g_pOldWndProc = (WNDPROC)SetWindowLongPtr(hwndEdit, GWLP_WNDPROC, (LONG_PTR)EditSubclassProc);   
+    if (g_pOldWndProc == NULL) {
+      // Handle error
+      MessageBox(hwnd, TEXT("Failed to subclass edit control"), TEXT("Error"), MB_OK | MB_ICONERROR);
+    }
+
+    g_hBrush = CreateSolidBrush(color);  // Yellow background
     break;
 
     
@@ -281,13 +291,13 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     windowRestored = FALSE;
     break;    
 
+    
     /* Start Moving withing Mclip */
  case WM_KEYDOWN:
    OnKeyDown(hwnd, wParam, hwndEdit, hwndList);
    break;
   
-    /* End Moving withing Mclip */
-  
+ 
   case WM_HOTKEY:
     // Check if the hotkey ID matches the registered hotkey (1 in this example).
     if (wParam == 1) {
@@ -305,15 +315,16 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
     break;
     
-       // Search box color
+    
   case WM_CTLCOLOREDIT:
-    if (GetDlgCtrlID((HWND)lParam) == IDC_SEARCH_EDIT) {
-      HDC hdcStatic = (HDC)wParam;
-      SetBkColor(hdcStatic, RGB(247, 248, 247)); // Set background color (here, it's red)
-      //      SetTextColor(hdcStatic, RGB(0, 0, 0)); // Set text color (here, it's black)
-      return (INT_PTR)CreateSolidBrush(RGB(0, 0, 0)); // Return a brush with the background color
+    {
+      HDC hdcEdit = (HDC)wParam;
+      SetBkColor(hdcEdit, color);  // Yellow background - RBF exists on two places
+      SetTextColor(hdcEdit, RGB(0, 0, 0));    // Black text
+      return (LRESULT)g_hBrush;
     }
-    break;        
+    break;
+   
     
   case WM_TRAY_ICON:
     if (wParam == IDI_MYTRAY_ICON) {
@@ -415,6 +426,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     break; 
     
   case WM_DESTROY:
+    DeleteObject(g_hBrush);
     PostQuitMessage(0);
     break;
   default:
@@ -437,7 +449,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
   HWND hwnd = CreateWindow(wc.lpszClassName, "mclip - Clipboard History App", WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
 			   CW_USEDEFAULT, CW_USEDEFAULT, 400, 310, NULL, NULL, hInstance, NULL);
-  
+
+  // Enables app to monitor change in clipboard without constantly pooling it
+  // Window will receive WM_CLIPBOARDUPDATE messages when changes occur.
   AddClipboardFormatListener(hwnd);
 
   //TODO: bug when other windows have same hotkey
