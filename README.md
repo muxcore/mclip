@@ -1,5 +1,5 @@
 # (micro) clipboard history app **'mclip'**
-Bare minimum clipboard history history application. Using only Win32 API.  
+Bare minimum clipboard history application. Using only Win32 API.  
 Logs every CTRL-C call, and shows content in Listbox window.  
 
 ![mclip](resources/mclip_icon.jpg)
@@ -28,6 +28,9 @@ Total time spent was 2.5h, with the help of LLM's!
 - ~~Add search box to filter items for substring - currently bug for filtered listbox.~~
 - Ability to change number of history items from the application itself.
 - Todo: Hotkeys currently mapped to ALT + VK_OEM_1 -- lookup what is it in your country.
+
+## Changelog
+ - 0.4.2 - added handling of Access Denied on Clipboard, with retries (simple, no exponential back off).
 
 ## Licence
 MIT 

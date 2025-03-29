@@ -10,10 +10,11 @@
 
 // Number of items in clipboard history.
 // Note: TODO: Should be option in app itself.
-#define MAX_HISTORY 50
+#define MAX_HISTORY 128
 
 #define IDC_SEARCH_EDIT 1001
 #define IDC_LISTBOX 1002
+#define TIMER_ID 1
 
 HWND hwndList;
 HWND hwndEdit;
@@ -34,6 +35,19 @@ WNDPROC g_pOldEditProc = NULL;
 // Global brush for the background color:
 HBRUSH g_hBrush = NULL;
 COLORREF color = RGB(235, 237, 202);  // Yellow color
+
+HBRUSH g_hRedBrush = NULL; // Red brush for error indication
+bool g_isFlashing = false; // Track if we're in error state
+
+
+// Just so that i can break on this function
+int
+incCurrentHistoryIndex(void)
+{
+  currentHistoryIndex++;
+  return currentHistoryIndex;
+}
+
 
 void
 displayLastError(const char *functionName)
@@ -63,7 +77,7 @@ displayLastError(const char *functionName)
 void
 ShowAboutDialog(HWND hwnd)
 {
-  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.4.1\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
+  MessageBox(hwnd, "mclip - Clipboard History App\n\nAuthor:Ilija Tatalovic\nVersion: 0.4.2\nLicence:MIT", "About", MB_OK | MB_ICONINFORMATION);
 }
 
 
@@ -314,8 +328,18 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       MessageBox(hwnd, TEXT("Failed to subclass edit control"), TEXT("Error"), MB_OK | MB_ICONERROR);
     }
 
+    g_hRedBrush = CreateSolidBrush(RGB(255, 0, 0)); // Red brush for error
     g_hBrush = CreateSolidBrush(color);  // Yellow background
     break;
+
+  case WM_TIMER:
+    if (wParam == TIMER_ID) {
+      g_isFlashing = false;
+      KillTimer(hwnd, TIMER_ID);
+      InvalidateRect(hwnd, NULL, TRUE); // Redraw with original color
+    }
+    break;
+
 
     
   case WM_KILLFOCUS:
@@ -350,12 +374,28 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   case WM_CTLCOLOREDIT:
     {
       HDC hdcEdit = (HDC)wParam;
-      SetBkColor(hdcEdit, color);  // Yellow background - RBF exists on two places
-      SetTextColor(hdcEdit, RGB(0, 0, 0));    // Black text
-      return (LRESULT)g_hBrush;
+      if (g_isFlashing) {
+        SetBkColor(hdcEdit, RGB(255, 0, 0)); // Red when flashing
+        return (LRESULT)g_hRedBrush;
+      } else {
+        SetBkColor(hdcEdit, color); // Normal yellow
+        return (LRESULT)g_hBrush;
+      }
     }
     break;
-   
+
+  case WM_PAINT:
+    {
+      PAINTSTRUCT ps;
+      HDC hdc = BeginPaint(hwnd, &ps);
+      if (g_isFlashing) {
+        FillRect(hdc, &ps.rcPaint, g_hRedBrush);
+      } else {
+        FillRect(hdc, &ps.rcPaint, g_hBrush);
+      }
+      EndPaint(hwnd, &ps);
+    }
+    break;    
     
   case WM_TRAY_ICON:
     if (wParam == IDI_MYTRAY_ICON) {
@@ -377,39 +417,73 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     else
       return DefWindowProc(hwnd, msg, wParam, lParam);    
     break;
-    
-  case WM_CLIPBOARDUPDATE:  
-    // once we have reached full history (high water mark of MAX_HISTORY), we know that we need to delete last item
-    /* if (lenHistory() == MAX_HISTORY) { */
-    /*   SendMessage(hwndList, LB_DELETESTRING, 0, 0); */
-    /*  }   */
-    
-    if (IsClipboardFormatAvailable(CF_TEXT)) {
-      if (OpenClipboard(hwnd)) {
-	HANDLE hClipboardData = GetClipboardData(CF_TEXT);
-	if (hClipboardData != NULL) {
-	  char* clipboardText = (char*)GlobalLock(hClipboardData);
-	  if (clipboardText != NULL) {	    
-	    if (!entryExists(clipboardText, clipboardHistory)) {
-	      if (clipboardHistory[currentHistoryIndex]) {
-		free(clipboardHistory[currentHistoryIndex]);
-	      }	      
-	      clipboardHistory[currentHistoryIndex] = _strdup(clipboardText);
-	      currentHistoryIndex = (currentHistoryIndex+1) % MAX_HISTORY;		      
-	      SendMessage(hwndList, LB_RESETCONTENT, 0, 0);
-	      for (int i = MAX_HISTORY-1; i >= 0; i--) {
-		if (clipboardHistory[i] != NULL) {
-		  SendMessage(hwndList, LB_ADDSTRING, 0, clipboardHistory[i]);
-		}
-	      }	      
-	    }
-	    GlobalUnlock(hClipboardData);
-	  }
-	}
-	CloseClipboard();
+
+  case WM_CLIPBOARDUPDATE:
+    if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+      int retryCount = 0;
+      const int maxRetries = 5;
+      const int retryDelayMs = 50;
+
+      while (retryCount < maxRetries) {
+        if (OpenClipboard(hwnd)) {
+          HANDLE hClipboardData = GetClipboardData(CF_UNICODETEXT);
+          if (hClipboardData != NULL) {
+            LPCWSTR clipboardText = (LPCWSTR)GlobalLock(hClipboardData);
+            if (clipboardText != NULL) {
+              char mbBuffer[1024];
+              WideCharToMultiByte(CP_ACP, 0, clipboardText, -1, mbBuffer, sizeof(mbBuffer), NULL, NULL);
+
+              if (!entryExists(mbBuffer, clipboardHistory)) {
+                if (clipboardHistory[currentHistoryIndex]) {
+                  free(clipboardHistory[currentHistoryIndex]);
+                }
+                clipboardHistory[currentHistoryIndex] = _strdup(mbBuffer);
+                currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;
+
+                SendMessage(hwndList, LB_RESETCONTENT, 0, 0);
+                for (int i = MAX_HISTORY - 1; i >= 0; i--) {
+                  if (clipboardHistory[i] != NULL) {
+                    SendMessage(hwndList, LB_ADDSTRING, 0, (LPARAM)clipboardHistory[i]);
+                  }
+                }
+              }
+              GlobalUnlock(hClipboardData);
+            }
+          }
+          CloseClipboard();
+          break; // Success
+        } else {
+          DWORD errorCode = GetLastError();
+          if (errorCode == ERROR_ACCESS_DENIED) {
+            retryCount++;
+            if (retryCount < maxRetries) {
+              Sleep(retryDelayMs);
+            } else {
+              // Flash window and play sound
+              FLASHWINFO flashInfo = { sizeof(FLASHWINFO) };
+              flashInfo.hwnd = hwnd;
+              flashInfo.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG; // Flash until foreground
+              flashInfo.uCount = 5; // Flash 5 times
+              flashInfo.dwTimeout = 0; // Default flash rate
+              FlashWindowEx(&flashInfo);
+
+              // Set red background and start timer to revert
+              g_isFlashing = true;
+              InvalidateRect(hwnd, NULL, TRUE);
+              SetTimer(hwnd, TIMER_ID, 1000, NULL); // 1 second red flash
+
+              // Play sound
+              Beep(750, 300); // 750 Hz for 300 ms
+            }
+          } else {
+            displayLastError("OpenClipboard");
+            break;
+          }
+        }
       }
     }
     break;
+   
     
   case WM_COMMAND:
     switch (LOWORD(wParam)) {
@@ -458,8 +532,10 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     
   case WM_DESTROY:
     DeleteObject(g_hBrush);
+    DeleteObject(g_hRedBrush);
     PostQuitMessage(0);
     break;
+
   default:
     return DefWindowProc(hwnd, msg, wParam, lParam);
   }
@@ -468,8 +544,8 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {  
   //Uncomment this to have console for Windows (== not console) programs
-  //AllocConsole();
-  //freopen("CONOUT$", "w", stdout); // Redirect stdout to the console window
+  /* AllocConsole(); */
+  /* freopen("CONOUT$", "w", stdout); // Redirect stdout to the console window */
   
   WNDCLASS wc = { 0 };
   wc.lpfnWndProc = WndProc;
