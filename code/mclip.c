@@ -1,6 +1,6 @@
 #define WIN32_LEAN_AND_MEAN // Exclude rarely-used stuff from Windows headers
-#define UNICODE             // Use Unicode APIs
-#define _UNICODE            // Use Unicode C runtime library functions
+#define UNICODE           // Use Unicode APIs
+#define _UNICODE          // Use Unicode C runtime library functions
 
 #include <windows.h>
 #include <shellapi.h> // For system tray
@@ -19,6 +19,11 @@
 #define TRAY_ICON_ID 101      // ID for the tray icon itself
 #define HOTKEY_ID_TOGGLE 1    // ID for the Alt+; hotkey
 #define IDM_ABOUT 10001       // Menu item ID for About
+
+// --- NEW: Constants for Search Debouncing ---
+#define TIMER_ID_SEARCH_DEBOUNCE 2 // New Timer ID for search delay
+#define SEARCH_DEBOUNCE_MS 300     // Delay in milliseconds (adjust 200-500ms as needed)
+// --- End NEW ---
 
 // --- Global Variables ---
 HWND hwndList = NULL;
@@ -41,7 +46,7 @@ WNDPROC g_pOldEditProc = NULL;
 HBRUSH g_hBrushBackground = NULL;
 HBRUSH g_hBrushFlash = NULL;
 COLORREF g_colorBackground = RGB(235, 237, 202); // Default background
-COLORREF g_colorFlash = RGB(255, 100, 100);    // Flash background (less harsh red)
+COLORREF g_colorFlash = RGB(255, 100, 100);      // Flash background (less harsh red)
 bool g_isFlashing = false;
 
 // Icon Handles
@@ -102,7 +107,7 @@ void
 ShowAboutDialog(HWND hwnd)
 {
     MessageBoxW(hwnd,
-               L"mclip - Clipboard History App\n\nAuthor: Ilija Tatalovic\nVersion: 0.5.0 (Refactored)\nLicence: MIT",
+               L"mclip - Clipboard History App\n\nAuthor: Ilija Tatalovic\nVersion: 0.5.1 (Debounced)\nLicence: MIT",
                L"About mclip",
                MB_OK | MB_ICONINFORMATION);
 }
@@ -155,7 +160,7 @@ void AddClipboardEntry(HWND hwnd, LPCWSTR clipboardText) {
             DisplayLastError(L"AddClipboardEntry _wcsdup");
             // Decrement count if allocation failed and we were adding a new item
              if (historyItemCount > 0 && historyItemCount <= MAX_HISTORY) {
-                 historyItemCount--;
+                  historyItemCount--;
              }
             MessageBoxW(hwnd, L"Failed to allocate memory for new clipboard entry.", L"Error", MB_OK | MB_ICONERROR);
             return; // Stop processing this entry
@@ -164,12 +169,15 @@ void AddClipboardEntry(HWND hwnd, LPCWSTR clipboardText) {
         // Move to the next index (circularly)
         currentHistoryIndex = (currentHistoryIndex + 1) % MAX_HISTORY;
 
-        // Update the list box (only if the window is visible or search isn't active?)
-        // For simplicity, always update if possible. Could optimize later.
+        // Update the list box only if the search filter is currently empty
+        // (avoids potentially slow updates when window is hidden but receiving clipboard events)
         wchar_t currentSearch[256] = {0};
-        if(hwndEdit) GetWindowTextW(hwndEdit, currentSearch, _countof(currentSearch));
-        UpdateListBox(hwndList, currentSearch);
-
+        if (hwndEdit) GetWindowTextW(hwndEdit, currentSearch, _countof(currentSearch));
+        // Only trigger full update if no search is active
+        if (currentSearch[0] == L'\0') {
+            UpdateListBox(hwndList, NULL);
+        }
+        // If a search *is* active, the next debounce timer execution will handle the update.
     }
 }
 
@@ -396,29 +404,29 @@ void OnKeyDownHandler(HWND hwnd, WPARAM wParam)
             break;
 
         case VK_RETURN: // Enter key - copies selected item to clipboard
-            if (focusedWnd == hwndList && selectedIndex != LB_ERR) {
-                int itemLengthW = SendMessageW(hwndList, LB_GETTEXTLEN, selectedIndex, 0);
-                if (itemLengthW != LB_ERR && itemLengthW > 0) {
-                    wchar_t *bufferW = malloc((itemLengthW + 1) * sizeof(wchar_t));
-                    if (bufferW) {
-                        SendMessageW(hwndList, LB_GETTEXT, selectedIndex, (LPARAM)bufferW);
-                        SetClipboardText(hwnd, bufferW); // Use helper function
-                        free(bufferW);
-                        // Optionally hide window after selection
-                        // ToggleWindowVisibility(hwnd);
-                    } else {
-                         DisplayLastError(L"OnKeyDownHandler malloc");
-                         MessageBoxW(hwnd, L"Failed to allocate memory to copy selection.", L"Error", MB_OK | MB_ICONERROR);
-                    }
-                }
-            } else if (focusedWnd == hwndEdit) {
-                 // Optional: If enter is pressed in edit box, maybe select first match in list?
-                 if (itemCount > 0) {
-                     SendMessageW(hwndList, LB_SETCURSEL, 0, 0);
-                     SetFocus(hwndList);
-                     // Could optionally copy it immediately too by replicating the listbox logic above
+             if (focusedWnd == hwndList && selectedIndex != LB_ERR) {
+                 int itemLengthW = SendMessageW(hwndList, LB_GETTEXTLEN, selectedIndex, 0);
+                 if (itemLengthW != LB_ERR && itemLengthW > 0) {
+                     wchar_t *bufferW = malloc((itemLengthW + 1) * sizeof(wchar_t));
+                     if (bufferW) {
+                         SendMessageW(hwndList, LB_GETTEXT, selectedIndex, (LPARAM)bufferW);
+                         SetClipboardText(hwnd, bufferW); // Use helper function
+                         free(bufferW);
+                         // Optionally hide window after selection
+                         // ToggleWindowVisibility(hwnd);
+                     } else {
+                          DisplayLastError(L"OnKeyDownHandler malloc");
+                          MessageBoxW(hwnd, L"Failed to allocate memory to copy selection.", L"Error", MB_OK | MB_ICONERROR);
+                     }
                  }
-            }
+             } else if (focusedWnd == hwndEdit) {
+                  // Optional: If enter is pressed in edit box, maybe select first match in list?
+                  if (itemCount > 0) {
+                      SendMessageW(hwndList, LB_SETCURSEL, 0, 0);
+                      SetFocus(hwndList);
+                      // Could optionally copy it immediately too by replicating the listbox logic above
+                  }
+             }
             break;
 
         // Note: Ctrl+P removed as it seemed like debug code.
@@ -451,7 +459,7 @@ LRESULT CALLBACK EditSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
             // }
              break;
 
-         case WM_GETDLGCODE:
+        case WM_GETDLGCODE:
              // Ensure Edit control processes arrow keys itself if needed,
              // and Enter key for potential actions (like triggering search/select)
              return CallWindowProcW(g_pOldEditProc, hwnd, message, wParam, lParam) | DLGC_WANTARROWS | DLGC_WANTCHARS;
@@ -471,12 +479,12 @@ LRESULT CALLBACK ListSubclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
         case WM_KEYDOWN:
             if (wParam == VK_TAB) {
                  if (hwndEdit) SetFocus(hwndEdit);
-                return 0; // Handled
+                 return 0; // Handled
             }
              // Let OnKeyDownHandler handle Up/Down/Enter/Esc in the main WndProc
              // if ((wParam == VK_UP || wParam == VK_DOWN || wParam == VK_RETURN || wParam == VK_ESCAPE)) {
-             //   SendMessage(GetParent(hwnd), message, wParam, lParam); // Forward to parent
-             //   return 0;
+             //  SendMessage(GetParent(hwnd), message, wParam, lParam); // Forward to parent
+             //  return 0;
              //}
             break;
 
@@ -524,26 +532,26 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             // Create ListBox (Use W version of class name)
             hwndList = CreateWindowW(L"LISTBOX", NULL,
-                                    WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS, // Added LBS_HASSTRINGS
-                                    10, 10, 360, 210, // Adjusted height slightly
-                                    hwnd, (HMENU)IDC_LISTBOX, hInstance, NULL);
+                                     WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_HASSTRINGS, // Added LBS_HASSTRINGS
+                                     10, 10, 360, 210, // Adjusted height slightly
+                                     hwnd, (HMENU)IDC_LISTBOX, hInstance, NULL);
             if (!hwndList) {
                 DisplayLastError(L"CreateWindowW LISTBOX"); return -1;
             }
 
             // Create Edit Control (Use W version of class name)
             hwndEdit = CreateWindowW(L"EDIT", NULL,
-                                    WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_LEFT,
-                                    10, 225, 360, 25, // Adjusted Y position
-                                    hwnd, (HMENU)IDC_SEARCH_EDIT, hInstance, NULL);
+                                     WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_LEFT,
+                                     10, 225, 360, 25, // Adjusted Y position
+                                     hwnd, (HMENU)IDC_SEARCH_EDIT, hInstance, NULL);
              if (!hwndEdit) {
                  DisplayLastError(L"CreateWindowW EDIT"); return -1;
              }
 
-             // Set Font (Optional but recommended for consistency)
-             HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-             SendMessageW(hwndList, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
-             SendMessageW(hwndEdit, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
+              // Set Font (Optional but recommended for consistency)
+              HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+              SendMessageW(hwndList, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
+              SendMessageW(hwndEdit, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
 
 
             // Subclass Edit and ListBox for Tab navigation etc.
@@ -556,18 +564,18 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 // Potentially non-fatal, Tab might just not work as expected
             }
 
-             // Add initial items to listbox
-             UpdateListBox(hwndList, NULL);
+              // Add initial items to listbox
+              UpdateListBox(hwndList, NULL);
 
-             // Set initial focus
-             SetFocus(hwndEdit);
+              // Set initial focus
+              SetFocus(hwndEdit);
 
-             // Listen for clipboard changes
-             if (!AddClipboardFormatListener(hwnd)) {
-                 DisplayLastError(L"AddClipboardFormatListener");
-                  MessageBoxW(hwnd, L"Failed to register clipboard listener.", L"Error", MB_OK | MB_ICONERROR);
-                  // Potentially fatal depending on requirements
-             }
+              // Listen for clipboard changes
+              if (!AddClipboardFormatListener(hwnd)) {
+                   DisplayLastError(L"AddClipboardFormatListener");
+                    MessageBoxW(hwnd, L"Failed to register clipboard listener.", L"Error", MB_OK | MB_ICONERROR);
+                    // Potentially fatal depending on requirements
+              }
         }
         break; // End WM_CREATE
 
@@ -579,6 +587,20 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 // Optional: Redraw main window background too if it was also flashing
                 // InvalidateRect(hwnd, NULL, TRUE);
             }
+            // --- NEW: Handle Search Debounce Timer ---
+            else if (wParam == TIMER_ID_SEARCH_DEBOUNCE) {
+                // Stop this specific debounce timer instance
+                KillTimer(hwnd, TIMER_ID_SEARCH_DEBOUNCE);
+
+                // Now perform the actual search update
+                wchar_t searchText[256] = {0};
+                // Ensure controls are valid before using them
+                if (hwndEdit && hwndList) {
+                    GetWindowTextW(hwndEdit, searchText, _countof(searchText));
+                    UpdateListBox(hwndList, searchText); // Update list based on current search text
+                }
+            }
+            // --- End NEW ---
             break;
 
         case WM_KEYDOWN:
@@ -593,7 +615,7 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             break;
 
         case WM_CTLCOLOREDIT:
-             // Color the background of the Edit control
+            // Color the background of the Edit control
             {
                 HDC hdcEdit = (HDC)wParam;
                 if ((HWND)lParam == hwndEdit) { // Check if it's our edit control
@@ -614,14 +636,14 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
          // case WM_CTLCOLORSTATIC: // For static controls, or main dialog background
          // case WM_ERASEBKGND:
          case WM_PAINT: // Basic background painting for main window gaps
-             {
-                 PAINTSTRUCT ps;
-                 HDC hdc = BeginPaint(hwnd, &ps);
-                 // Use the background brush, could also flash main window if desired
-                  FillRect(hdc, &ps.rcPaint, g_hBrushBackground);
-                 EndPaint(hwnd, &ps);
-             }
-             return 0; // We handled painting
+            {
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hwnd, &ps);
+                // Use the background brush, could also flash main window if desired
+                 FillRect(hdc, &ps.rcPaint, g_hBrushBackground);
+                EndPaint(hwnd, &ps);
+            }
+            return 0; // We handled painting
 
 
         case WM_TRAY_ICON: // Message received from the tray icon
@@ -629,12 +651,12 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                  // Check the mouse message
                  switch (LOWORD(lParam)) {
                     case WM_LBUTTONUP: // Left click
-                        ToggleWindowVisibility(hwnd);
-                        break;
+                         ToggleWindowVisibility(hwnd);
+                         break;
 
                     // Could add WM_RBUTTONUP for a context menu
                      case WM_RBUTTONUP:
-                         // TODO: Show context menu (e.g., "About", "Exit")
+                          // TODO: Show context menu (e.g., "About", "Exit")
                           break;
                  }
             }
@@ -648,70 +670,70 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 // No need to re-add tray icon if it's already there
                 return 0; // Handled
             }
-             // Important: Let default processing handle other commands (like SC_CLOSE)
-            return DefWindowProcW(hwnd, msg, wParam, lParam);
+              // Important: Let default processing handle other commands (like SC_CLOSE)
+              return DefWindowProcW(hwnd, msg, wParam, lParam);
 
 
         case WM_CLIPBOARDUPDATE:
             // Check format availability and attempt to open clipboard
              if (IsClipboardFormatAvailable(CF_UNICODETEXT)) {
-                int retryCount = 0;
-                const int maxRetries = 5;
-                const int retryDelayMs = 50;
+                 int retryCount = 0;
+                 const int maxRetries = 5;
+                 const int retryDelayMs = 50;
 
-                while (retryCount < maxRetries) {
-                    if (OpenClipboard(hwnd)) {
-                        HANDLE hClipboardData = GetClipboardData(CF_UNICODETEXT);
-                        if (hClipboardData != NULL) {
-                             LPCWSTR clipboardText = (LPCWSTR)GlobalLock(hClipboardData);
-                             if (clipboardText != NULL) {
-                                 // Process and add the entry (includes duplicate check)
-                                 AddClipboardEntry(hwnd, clipboardText);
-                                 GlobalUnlock(hClipboardData);
-                             } else {
-                                 DisplayLastError(L"WM_CLIPBOARDUPDATE GlobalLock");
+                 while (retryCount < maxRetries) {
+                     if (OpenClipboard(hwnd)) {
+                         HANDLE hClipboardData = GetClipboardData(CF_UNICODETEXT);
+                         if (hClipboardData != NULL) {
+                              LPCWSTR clipboardText = (LPCWSTR)GlobalLock(hClipboardData);
+                              if (clipboardText != NULL) {
+                                  // Process and add the entry (includes duplicate check)
+                                  AddClipboardEntry(hwnd, clipboardText);
+                                  GlobalUnlock(hClipboardData);
+                              } else {
+                                  DisplayLastError(L"WM_CLIPBOARDUPDATE GlobalLock");
+                              }
+                         } else {
+                              // GetClipboardData returning NULL might be okay if format changed quickly
+                              // DisplayLastError(L"WM_CLIPBOARDUPDATE GetClipboardData");
+                         }
+                         CloseClipboard();
+                         break; // Success, exit retry loop
+                     } else {
+                         // Failed to open clipboard
+                          DWORD errorCode = GetLastError();
+                         if (errorCode == ERROR_ACCESS_DENIED) {
+                              retryCount++;
+                              if (retryCount < maxRetries) {
+                                  Sleep(retryDelayMs); // Wait before retrying
+                              } else {
+                                  // Max retries reached - indicate error visually
+                                  if (!g_isFlashing) { // Flash only if not already flashing
+                                       g_isFlashing = true;
+                                       InvalidateRect(hwndEdit, NULL, TRUE); // Redraw edit background
+                                       // Optional: Flash main window background too
+                                       // InvalidateRect(hwnd, NULL, TRUE);
+                                       SetTimer(hwnd, TIMER_ID_FLASH, 1000, NULL); // Timer to stop flash
+
+                                       // Optional: Flash taskbar icon (can be annoying)
+                                       // FLASHWINFO flashInfo = { sizeof(FLASHWINFO) };
+                                       // flashInfo.hwnd = hwnd;
+                                       // flashInfo.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
+                                       // flashInfo.uCount = 3;
+                                       // flashInfo.dwTimeout = 0;
+                                       // FlashWindowEx(&flashInfo);
+
+                                       // Play sound
+                                       Beep(750, 300);
+                                  }
                              }
-                        } else {
-                             // GetClipboardData returning NULL might be okay if format changed quickly
-                             // DisplayLastError(L"WM_CLIPBOARDUPDATE GetClipboardData");
-                        }
-                        CloseClipboard();
-                        break; // Success, exit retry loop
-                    } else {
-                        // Failed to open clipboard
-                         DWORD errorCode = GetLastError();
-                        if (errorCode == ERROR_ACCESS_DENIED) {
-                            retryCount++;
-                            if (retryCount < maxRetries) {
-                                Sleep(retryDelayMs); // Wait before retrying
-                            } else {
-                                // Max retries reached - indicate error visually
-                                if (!g_isFlashing) { // Flash only if not already flashing
-                                     g_isFlashing = true;
-                                     InvalidateRect(hwndEdit, NULL, TRUE); // Redraw edit background
-                                     // Optional: Flash main window background too
-                                     // InvalidateRect(hwnd, NULL, TRUE);
-                                     SetTimer(hwnd, TIMER_ID_FLASH, 1000, NULL); // Timer to stop flash
-
-                                     // Optional: Flash taskbar icon (can be annoying)
-                                     // FLASHWINFO flashInfo = { sizeof(FLASHWINFO) };
-                                     // flashInfo.hwnd = hwnd;
-                                     // flashInfo.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
-                                     // flashInfo.uCount = 3;
-                                     // flashInfo.dwTimeout = 0;
-                                     // FlashWindowEx(&flashInfo);
-
-                                      // Play sound
-                                     Beep(750, 300);
-                                }
-                            }
-                        } else {
-                            // Different error opening clipboard
-                            DisplayLastError(L"WM_CLIPBOARDUPDATE OpenClipboard");
-                            break; // Don't retry on unexpected errors
-                        }
-                    }
-                } // End retry loop
+                         } else {
+                              // Different error opening clipboard
+                              DisplayLastError(L"WM_CLIPBOARDUPDATE OpenClipboard");
+                              break; // Don't retry on unexpected errors
+                         }
+                     }
+                 } // End retry loop
              }
             break; // End WM_CLIPBOARDUPDATE
 
@@ -727,19 +749,22 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                         break;
 
                     case IDC_SEARCH_EDIT:
-                         if (notificationCode == EN_CHANGE) {
-                            wchar_t searchText[256] = {0};
-                            GetWindowTextW(hwndCtl, searchText, _countof(searchText));
-                            UpdateListBox(hwndList, searchText); // Pass filter to update function
-                         }
+                        if (notificationCode == EN_CHANGE) {
+                            // --- MODIFIED: Trigger Debounce Timer ---
+                            // Kill any existing debounce timer to reset the delay
+                            KillTimer(hwnd, TIMER_ID_SEARCH_DEBOUNCE);
+                            // Set a new timer to trigger the search update after a pause
+                            SetTimer(hwnd, TIMER_ID_SEARCH_DEBOUNCE, SEARCH_DEBOUNCE_MS, NULL);
+                            // --- End MODIFIED ---
+                        }
                         break;
 
                      // Optional: Handle LBN_DBLCLK on listbox to copy and maybe hide
                      case IDC_LISTBOX:
                          if (notificationCode == LBN_DBLCLK) {
-                              OnKeyDownHandler(hwnd, VK_RETURN); // Simulate Enter press logic
-                              // Maybe hide the window after double click?
-                              // ToggleWindowVisibility(hwnd);
+                               OnKeyDownHandler(hwnd, VK_RETURN); // Simulate Enter press logic
+                               // Maybe hide the window after double click?
+                               // ToggleWindowVisibility(hwnd);
                          }
                           // Note: LBN_SELCHANGE to copy automatically removed as it can be annoying.
                           // User must explicitly press Enter or double-click.
@@ -754,10 +779,10 @@ WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
              break;
 
          case WM_NCDESTROY:
-             // Good place to unsubclass if needed, though often okay if window is truly destroyed
-             if (g_pOldEditProc) SetWindowLongPtrW(hwndEdit, GWLP_WNDPROC, (LONG_PTR)g_pOldEditProc);
-             if (g_pOldListProc) SetWindowLongPtrW(hwndList, GWLP_WNDPROC, (LONG_PTR)g_pOldListProc);
-             break;
+              // Good place to unsubclass if needed, though often okay if window is truly destroyed
+              if (g_pOldEditProc) SetWindowLongPtrW(hwndEdit, GWLP_WNDPROC, (LONG_PTR)g_pOldEditProc);
+              if (g_pOldListProc) SetWindowLongPtrW(hwndList, GWLP_WNDPROC, (LONG_PTR)g_pOldListProc);
+              break;
 
 
         case WM_DESTROY:
@@ -783,66 +808,78 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 {
     // Optional: Allocate console for debugging (remove for release)
     // AllocConsole();
-    // FILE* pCout;
-    // freopen_s(&pCout, "CONOUT$", "w", stdout);
+    // FreeConsole(); // Use if you allocated it
 
-    // Register the window class (Use W version)
-    WNDCLASSW wc = { 0 };
+    // --- Standard Window Class Registration ---
+    const wchar_t CLASS_NAME[] = L"mclipWindowClass";
+    WNDCLASSW wc = {0}; // Use W version
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"ClipboardHistoryAppWClass"; // Use W suffix for clarity
-    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_MYICON_BIG)); // Load default icon for class
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); // Default window color initially
+    // Load icon resource (ensure resource.h defines IDI_MYICON_BIG)
+    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_MYICON_BIG));
+    // Load cursor
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    // wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); // Or use custom painting
 
-    if (!RegisterClassW(&wc)) {
-         DisplayLastError(L"RegisterClassW");
-         MessageBoxW(NULL, L"Failed to register window class!", L"Fatal Error", MB_OK | MB_ICONERROR);
-         return 1;
+    if (!RegisterClassW(&wc)) { // Use W version
+        DisplayLastError(L"RegisterClassW");
+        MessageBoxW(NULL, L"Window Registration Failed!", L"Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
     }
 
-    // Create the main window (Use W version)
-    HWND hwnd = CreateWindowExW(
-        0,                              // Optional window styles.
-        wc.lpszClassName,               // Window class
-        L"mclip - Clipboard History",   // Window text
-        WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME, // Window style (non-resizable)
-        CW_USEDEFAULT, CW_USEDEFAULT,   // Position
-        400, 310,                       // Size (width, height matching controls)
-        NULL,                           // Parent window
-        NULL,                           // Menu
-        hInstance,                      // Instance handle
-        NULL                            // Additional application data
+    // --- Create the Window ---
+    HWND hwnd = CreateWindowExW( // Use W version
+        0,                          // Optional window styles.
+        CLASS_NAME,                 // Window class
+        L"mclip - Clipboard History", // Window text (Title)
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, // Window style (No resize)
+        // Size and position
+        CW_USEDEFAULT, CW_USEDEFAULT, 395, 310, // Adjusted size slightly for controls
+        NULL,       // Parent window
+        NULL,       // Menu (Set in WM_CREATE)
+        hInstance,  // Instance handle
+        NULL        // Additional application data
     );
 
     if (hwnd == NULL) {
         DisplayLastError(L"CreateWindowExW");
-        MessageBoxW(NULL, L"Failed to create main window!", L"Fatal Error", MB_OK | MB_ICONERROR);
-        return 1;
+        MessageBoxW(NULL, L"Window Creation Failed!", L"Error!", MB_ICONEXCLAMATION | MB_OK);
+        return 0;
     }
 
-    // Register the hotkey (Alt + ;) VK_OEM_1 is often ';'
-    // Add MOD_NOREPEAT to prevent multiple triggers when held down
+     // Register the hotkey (Alt + ;) - VK_OEM_1 is often ';'
+    // Use MOD_ALT | MOD_NOREPEAT
     if (!RegisterHotKey(hwnd, HOTKEY_ID_TOGGLE, MOD_ALT | MOD_NOREPEAT, VK_OEM_1)) {
         DisplayLastError(L"RegisterHotKey");
-        MessageBoxW(hwnd, L"Failed to register hotkey (Alt+;). It might be in use by another application.", L"Warning", MB_OK | MB_ICONWARNING);
-        // Continue execution even if hotkey fails? Or exit? Depends on requirements.
+        // Maybe non-fatal, show warning
+        MessageBoxW(hwnd, L"Failed to register global hotkey (Alt+;). The window can still be opened from the tray.", L"Warning", MB_OK | MB_ICONWARNING);
     }
 
-    // Show the window
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
 
-    // Main message loop
-    MSG msg;
+    // Show the window (or hide if starting minimized to tray)
+    // nCmdShow might suggest starting minimized (SW_MINIMIZE), but we hide instead.
+    // Start visible initially, user can hide with Esc/Minimize/Hotkey/Tray click
+    ShowWindow(hwnd, nCmdShow); // Use nCmdShow initially
+    // If nCmdShow suggested minimize, immediately hide it to tray
+    if (nCmdShow == SW_SHOWMINIMIZED || nCmdShow == SW_MINIMIZE || nCmdShow == SW_SHOWMINNOACTIVE ) {
+         ShowWindow(hwnd, SW_HIDE);
+         windowRestored = false;
+    } else {
+         UpdateWindow(hwnd);
+         windowRestored = true;
+    }
+
+
+    // --- Message Loop ---
+    MSG msg = {0};
     while (GetMessageW(&msg, NULL, 0, 0) > 0) { // Use W version
-         // Optional: Add IsDialogMessage check if treating as a dialog for Tab navigation etc.
-         // if (!IsDialogMessage(hwnd, &msg)) {
-             TranslateMessage(&msg);
-             DispatchMessageW(&msg); // Use W version
-         // }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg); // Use W version
     }
 
-    // Return the exit code from PostQuitMessage
-    return (int)msg.wParam;
+    // Unregister hotkey when loop ends (also done in WM_DESTROY, but good for safety)
+    UnregisterHotKey(hwnd, HOTKEY_ID_TOGGLE);
+
+    return (int)msg.wParam; // Return exit code
 }
