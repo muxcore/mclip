@@ -13,10 +13,7 @@ Created with:
 2. Adjust *build.bat* to your local environement variables and path. 
 4. If everything goes well *\build* directory will contain final binary.  
 
-Or use binary available in build directory.  
-![](build/mclip.zip)
 ![mclip_app](resources/mclip_app.jpg)
-
 
 
 ## Disclaimer
@@ -31,7 +28,9 @@ Total time spent was 2.5h, with the help of LLM's!
 
 ## Changelog
  - 0.4.2 - added handling of Access Denied on Clipboard, with retries (simple, no exponential back off).
-
+ - 0.5.1 - delay in searches - improves speed
+ 
+ 
 ## Licence
 MIT 
 
